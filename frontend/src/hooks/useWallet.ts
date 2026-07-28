@@ -1,44 +1,63 @@
-'use client';
-import { useCallback } from 'react';
-import { toast } from 'sonner';
-import { connectFreighter } from '@/lib/stellar';
-import { useWalletStore } from '@/store/walletStore';
-import { FREIGHTER_DOWNLOAD } from '@/lib/constants';
+import { useCallback } from "react";
+import { requestAccess, getAddress, getNetwork } from "@stellar/freighter-api";
+import { toast } from "sonner";
+import { useWalletStore } from "@/store/walletStore";
+
+const FREIGHTER_DOWNLOAD_URL = "https://freighter.app";
+
+function isFreighterInstalled(): boolean {
+  return typeof window !== "undefined" && "freighter" in window;
+}
 
 export function useWallet() {
-  const store = useWalletStore();
+  const {
+    status,
+    publicKey,
+    network,
+    error,
+    setConnecting,
+    setConnected,
+    setError,
+    disconnect,
+  } = useWalletStore();
 
   const connect = useCallback(async () => {
-    store.setConnecting();
-    try {
-      const { publicKey, network } = await connectFreighter();
-      store.setConnected(publicKey, network);
-      toast.success('Wallet connected!');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Connection failed';
-      if (msg === 'FREIGHTER_NOT_INSTALLED') {
-        store.setError('Freighter not installed');
-        toast.error('Freighter not found. Installing now…', { duration: 3000 });
-        window.open(FREIGHTER_DOWNLOAD, '_blank');
-        return;
-      }
-      store.setError(msg);
-      toast.error(msg, { duration: 6000 });
+    if (!isFreighterInstalled()) {
+      toast.error("Freighter wallet is not installed");
+      window.open(FREIGHTER_DOWNLOAD_URL, "_blank");
+      return;
     }
-  }, [store]);
 
-  const disconnect = useCallback(() => {
-    store.disconnect();
-    toast.info('Wallet disconnected.');
-  }, [store]);
+    setConnecting();
+    toast.loading("Connecting wallet...", { id: "wallet-connect" });
+
+    try {
+      await requestAccess();
+      const { address: pk } = await getAddress();
+      const net = await getNetwork();
+      setConnected(pk, net.networkPassphrase);
+      toast.success("Wallet connected!", { id: "wallet-connect" });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to connect wallet";
+      setError(message);
+      toast.error(message, { id: "wallet-connect" });
+    }
+  }, [setConnecting, setConnected, setError]);
+
+  const disconnectWallet = useCallback(() => {
+    disconnect();
+    toast.success("Wallet disconnected");
+  }, [disconnect]);
 
   return {
-    status: store.status,
-    publicKey: store.publicKey,
-    network: store.network,
-    error: store.error,
-    isConnected: store.status === 'connected' && !!store.publicKey,
+    status,
+    publicKey,
+    network,
+    error,
     connect,
-    disconnect,
+    disconnect: disconnectWallet,
+    isConnected: status === "connected",
+    isConnecting: status === "connecting",
   };
 }

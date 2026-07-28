@@ -11,6 +11,9 @@ testutils = ["soroban-sdk/testutils"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
+automint-registry = { path = "../registry" }
 
 [dev-dependencies]
 soroban-sdk = { version = "21", features = ["testutils"] }
+automint-registry = { path = "../registry", features = ["testutils"] }
+automint-token = { path = "../token", features = ["testutils"] }

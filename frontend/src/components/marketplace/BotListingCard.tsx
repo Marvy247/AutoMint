@@ -1,110 +1,168 @@
-'use client';
-import { motion } from 'framer-motion';
-import { ShoppingCart, Loader2, X, Zap } from 'lucide-react';
-import { TIER_META, tierFromIndex, stroopsToXlm } from '@/types';
-import { truncateAddress } from '@/lib/stellar';
-import type { Listing } from '@/types';
+"use client";
+
+import { motion } from "framer-motion";
+import { Bot, ShoppingCart, X, Zap, Tag } from "lucide-react";
+import clsx from "clsx";
+import {
+  BotTier,
+  BOT_TIER_NAMES,
+  BOT_TIER_COLORS,
+  BOT_TIER_BG_COLORS,
+  TIER_META,
+  stroopsToXlm,
+} from "@/types";
+import type { MarketplaceListing, BotNFT } from "@/types";
 
 interface BotListingCardProps {
-  listing: Listing;
-  currentUserAddress?: string | null;
+  listing: MarketplaceListing;
+  bot: BotNFT;
+  connectedAddress: string | null;
   onBuy: (listingId: bigint) => void;
   onCancel: (listingId: bigint) => void;
-  isBuying: boolean;
-  isCancelling: boolean;
+  isBuying?: boolean;
+  isCancelling?: boolean;
 }
 
-export function BotListingCard({ listing, currentUserAddress, onBuy, onCancel, isBuying, isCancelling }: BotListingCardProps) {
-  const tier = tierFromIndex(listing.botTier);
-  const meta = TIER_META[tier];
-  const isMine = currentUserAddress === listing.seller;
-  const xlmPrice = stroopsToXlm(listing.price);
-  const listedDate = new Date(Number(listing.listedAt) * 1000).toLocaleDateString();
+function truncateAddress(address: string): string {
+  if (address.length <= 12) return address;
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+export default function BotListingCard({
+  listing,
+  bot,
+  connectedAddress,
+  onBuy,
+  onCancel,
+  isBuying = false,
+  isCancelling = false,
+}: BotListingCardProps) {
+  const tier = bot.tier as BotTier;
+  const tierName = BOT_TIER_NAMES[tier] ?? "Unknown";
+  const tierColor = BOT_TIER_COLORS[tier] ?? "text-muted";
+  const tierBg = BOT_TIER_BG_COLORS[tier] ?? "bg-muted/20";
+  const tierMeta = TIER_META[tier];
+  const priceXlm = stroopsToXlm(listing.price);
+  const isOwner =
+    connectedAddress !== null &&
+    listing.seller.toLowerCase() === connectedAddress.toLowerCase();
 
   return (
     <motion.div
-      layout
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      className="bot-card overflow-hidden"
-      style={{ background: 'var(--card-2)', borderRadius: '20px', border: `1px solid ${meta.color}20` }}
+      transition={{ duration: 0.3 }}
+      className={clsx(
+        "relative rounded-2xl border border-liner bg-card p-5",
+        "flex flex-col gap-4",
+        "hover:border-white/10 transition-colors"
+      )}
+      data-testid={`listing-card-${listing.id.toString()}`}
     >
-      {/* Tier stripe */}
-      <div style={{ height: '3px', background: meta.color, opacity: 0.7 }} />
-
-      <div style={{ padding: '20px' }}>
-        {/* Bot info header */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
-              style={{ background: `${meta.color}18`, border: `1px solid ${meta.color}35` }}
-            >
-              {meta.emoji}
-            </div>
-            <div>
-              <div className="font-black text-sm uppercase tracking-wide" style={{ fontFamily: "'Sora', sans-serif", color: 'var(--text)' }}>
-                {meta.tier}
-              </div>
-              <div className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
-                #{String(listing.botId).padStart(4, '0')}
-              </div>
-            </div>
+      {/* Header: tier icon + name + tier badge */}
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div
+            className={clsx(
+              "flex h-11 w-11 items-center justify-center rounded-xl text-xl",
+              tierBg
+            )}
+          >
+            {tierMeta?.emoji ?? <Bot className={clsx("h-5 w-5", tierColor)} />}
           </div>
-          {isMine && (
-            <span className="badge badge-blue" style={{ fontSize: '9px', padding: '2px 7px' }}>Yours</span>
-          )}
-        </div>
-
-        {/* Rate */}
-        <div className="flex items-center gap-1.5 mb-1">
-          <Zap className="w-3.5 h-3.5" style={{ color: 'var(--green)' }} />
-          <span className="text-xs" style={{ color: 'var(--muted)' }}>
-            <span style={{ color: 'var(--green)', fontWeight: 700, fontFamily: "'Sora', sans-serif" }}>{meta.ratePerHour}</span> pts/hr
-          </span>
-        </div>
-
-        {/* Seller */}
-        <div className="text-xs mb-4" style={{ color: 'var(--muted)', opacity: 0.7 }}>
-          Listed {listedDate} · {truncateAddress(listing.seller, 4)}
-        </div>
-
-        {/* Price + action */}
-        <div className="flex items-center justify-between">
           <div>
-            <div
-              className="font-black"
-              style={{ fontFamily: "'Sora', sans-serif", fontSize: '20px', color: 'var(--gold)', letterSpacing: '-0.5px' }}
-            >
-              {xlmPrice.toLocaleString()}
-              <span className="text-sm ml-1" style={{ color: 'var(--muted)', fontWeight: 500 }}>XLM</span>
-            </div>
+            <p className="font-display text-sm font-semibold text-text">
+              {bot.name || tierName} Bot
+            </p>
+            <p className="text-xs text-muted">#{bot.id.toString()}</p>
           </div>
+        </div>
 
-          {isMine ? (
-            <button
-              onClick={() => onCancel(listing.id)}
-              disabled={isCancelling}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
-              style={{ border: '1px solid rgba(255,111,174,0.35)', color: 'var(--pink)', background: 'rgba(255,111,174,0.1)', cursor: 'pointer' }}
-            >
-              {isCancelling ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
-              Cancel
-            </button>
-          ) : (
-            <button
-              onClick={() => onBuy(listing.id)}
-              disabled={isBuying || !currentUserAddress}
-              className="btn-primary flex items-center gap-1.5"
-              style={{ padding: '8px 14px', borderRadius: '12px', fontSize: '12px', fontWeight: 700 }}
-            >
-              {isBuying ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShoppingCart className="w-3 h-3" />}
-              Buy
-            </button>
+        <span
+          className={clsx(
+            "inline-flex items-center rounded-full px-2.5 py-0.5",
+            "text-xs font-medium",
+            tierBg,
+            tierColor
           )}
+        >
+          {tierName}
+        </span>
+      </div>
+
+      {/* Stats: rate + price */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex items-center gap-2 rounded-lg bg-card-2 px-3 py-2">
+          <Zap className="h-3.5 w-3.5 text-gold" />
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted">
+              Rate
+            </p>
+            <p className="text-sm font-semibold text-text">
+              {bot.accrual_rate.toString()}{" "}
+              <span className="text-xs font-normal text-muted">pt/hr</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 rounded-lg bg-card-2 px-3 py-2">
+          <Tag className="h-3.5 w-3.5 text-green" />
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted">
+              Price
+            </p>
+            <p className="text-sm font-semibold text-text">
+              {priceXlm.toLocaleString("en-US", { maximumFractionDigits: 2 })}{" "}
+              <span className="text-xs font-normal text-muted">XLM</span>
+            </p>
+          </div>
         </div>
       </div>
+
+      {/* Seller */}
+      <div className="flex items-center justify-between rounded-lg bg-card-2 px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-muted">
+          Seller
+        </span>
+        <span className="font-mono text-xs text-text" title={listing.seller}>
+          {truncateAddress(listing.seller)}
+        </span>
+      </div>
+
+      {/* Action button */}
+      {isOwner ? (
+        <button
+          onClick={() => onCancel(listing.id)}
+          disabled={isCancelling}
+          data-testid={`cancel-btn-${listing.id.toString()}`}
+          className={clsx(
+            "flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5",
+            "text-sm font-medium transition-all",
+            isCancelling
+              ? "border-liner bg-card-2 text-muted cursor-not-allowed opacity-50"
+              : "border-pink/30 bg-pink/10 text-pink hover:bg-pink/20 hover:border-pink/50"
+          )}
+        >
+          <X className="h-4 w-4" />
+          {isCancelling ? "Cancelling..." : "Cancel Listing"}
+        </button>
+      ) : (
+        <button
+          onClick={() => onBuy(listing.id)}
+          disabled={isBuying || !connectedAddress}
+          data-testid={`buy-btn-${listing.id.toString()}`}
+          className={clsx(
+            "flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5",
+            "text-sm font-medium transition-all",
+            isBuying || !connectedAddress
+              ? "border-liner bg-card-2 text-muted cursor-not-allowed opacity-50"
+              : "border-gold/30 bg-gold/10 text-gold hover:bg-gold/20 hover:border-gold/50"
+          )}
+        >
+          <ShoppingCart className="h-4 w-4" />
+          {isBuying ? "Buying..." : "Buy"}
+        </button>
+      )}
     </motion.div>
   );
 }

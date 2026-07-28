@@ -11,8 +11,10 @@ testutils = ["soroban-sdk/testutils"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
+automint-bot-nft = { path = "../bot_nft" }
 
 [dev-dependencies]
 soroban-sdk = { version = "21", features = ["testutils"] }
 automint-bot-nft = { path = "../bot_nft", features = ["testutils"] }
+automint-registry = { path = "../registry", features = ["testutils"] }
 automint-token = { path = "../token", features = ["testutils"] }

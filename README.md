@@ -1,29 +1,15 @@
-# AutoMint
+# AutoMint — testnet-implementation
 
-**Idle auto-mining dApp on Stellar (Soroban).**  
+**Idle auto-mining dApp on Stellar (Soroban).**
 Deploy NFT bots that accrue `$AMT` tokens 24/7. No tapping. Trade bots on a P2P marketplace. Compete on an on-chain leaderboard.
 
----
+This branch is a **bare scaffold**. The folder structure, configs, and dependency manifests are in place — the actual contract logic and frontend code have been stripped out into `// TODO` placeholders. Every file maps to one or more issues on the [Issues tab](../../issues). Pick an issue, implement just that piece, and open a PR against this branch.
 
-**[Live App](https://auto-mint-theta.vercel.app/)** &nbsp;|&nbsp; **[Demo Video](https://www.loom.com/share/ba6c8e7cd5eb49b0ad46b691d61fdc3b)** &nbsp;|&nbsp; **[Stellar Expert](https://stellar.expert/explorer/testnet)**
-
----
-
-## Contracts (Testnet)
-
-| Contract    | Address | Explorer |
-|-------------|---------|---------|
-| AMT Token   | `CDEERRPRAJ4SQEJ47D2KT4W4QO37KLTXP24YIDGH3L2MOAVDDXO334T2` | [View](https://stellar.expert/explorer/testnet/contract/CDEERRPRAJ4SQEJ47D2KT4W4QO37KLTXP24YIDGH3L2MOAVDDXO334T2) |
-| Registry    | `CA4ZWH7SRLLY42DCE7DMPMW6BAVJXAJ5E7Q63BZLMIEKVIECIDJSXBI7` | [View](https://stellar.expert/explorer/testnet/contract/CA4ZWH7SRLLY42DCE7DMPMW6BAVJXAJ5E7Q63BZLMIEKVIECIDJSXBI7) |
-| Bot NFT     | `CD7BXYZIZZ6AHB6KEXTCBPCAPOETY3HELVZYDAZX5S6OVWEFUE43CI6E` | [View](https://stellar.expert/explorer/testnet/contract/CD7BXYZIZZ6AHB6KEXTCBPCAPOETY3HELVZYDAZX5S6OVWEFUE43CI6E) |
-| Accrual     | `CDFUBWJW5QFHNUFGSR4LCDCVNYR3PBF4J4YWEZC56G24ERQGVYBA5BWS` | [View](https://stellar.expert/explorer/testnet/contract/CDFUBWJW5QFHNUFGSR4LCDCVNYR3PBF4J4YWEZC56G24ERQGVYBA5BWS) |
-| Marketplace | `CCYTOPEAH322S2XVWWOODYMFUXLHJP4YKLEZ4RXGHDVZNM2BUBBHIRCM` | [View](https://stellar.expert/explorer/testnet/contract/CCYTOPEAH322S2XVWWOODYMFUXLHJP4YKLEZ4RXGHDVZNM2BUBBHIRCM) |
-
-Deployer: `GDQ6QUVINBCLB3ZCA5BHDBI6E7BNJGCIDWX7WPE2F7UYSGD7P5KBPM2F`
+> Looking for the finished reference build? See the `main` branch.
 
 ---
 
-## How it works
+## How it works (target behavior)
 
 ```
 Register  ──► registry.register()
@@ -57,51 +43,81 @@ Marketplace:
 
 ---
 
-## Local Setup
+## Repo layout
+
+```
+contracts/
+  token/        AMT token contract        (Soroban, Rust)
+  registry/     usernames + point totals
+  bot_nft/      bot ownership + tiers
+  accrual/      point accrual math + claims
+  marketplace/  P2P escrow trading
+
+frontend/
+  src/app/            Next.js App Router pages
+  src/components/     UI components
+  src/hooks/          React Query hooks (data + mutations)
+  src/lib/            stellar.ts (RPC/Freighter), contracts.ts (contract calls)
+  src/store/          Zustand wallet store
+  src/types/          shared TypeScript types
+```
+
+Every `.rs`/`.ts`/`.tsx` file under `contracts/` and `frontend/src/` currently contains only a `// TODO` stub. Config files (`Cargo.toml`, `package.json`, `tsconfig.json`, etc.) are untouched and functional.
+
+---
+
+## Getting started
 
 ```bash
-# 1. Install Rust + Stellar CLI
+# 1. Fork the repo, then clone your fork
+git clone https://github.com/<your-username>/AutoMint.git
+cd AutoMint
+git checkout testnet-implementation
+
+# 2. Rust + Stellar CLI (only needed for contract issues)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup target add wasm32v1-none
 cargo install --locked stellar-cli --features opt
 
-# 2. Run frontend (already wired to testnet contracts)
+# 3. Frontend (only needed for frontend issues)
 cd frontend
 npm install
-npm run dev   # http://localhost:3000
+cp .env.example .env.local   # fill in contract IDs once deployed
+npm run dev                  # http://localhost:3000
 ```
 
-Install [Freighter](https://freighter.app) wallet. Switch it to **Testnet**.
+Install [Freighter](https://freighter.app) wallet and switch it to **Testnet** for frontend work.
 
-## Deploy contracts yourself
+## Picking up an issue
 
-```bash
-# Generate + fund a deployer key
-stellar keys generate mykey --network testnet
-curl "https://friendbot.stellar.org/?addr=$(stellar keys address mykey)"
-
-# Build + deploy all contracts + write .env.local
-./scripts/deploy.sh testnet mykey
-```
+1. Browse [open issues](../../issues) — each one names the exact file and function/component to implement, with the expected behavior described.
+2. Comment on the issue to get it assigned to you, so no one else duplicates the work.
+3. Branch off `testnet-implementation`:
+   ```bash
+   git checkout -b issue-123-implement-claim testnet-implementation
+   ```
+4. Implement only what the issue asks for. Don't touch unrelated files — other issues depend on them staying untouched until their own PR lands.
+5. Open a PR **against `testnet-implementation`** (not `main`), referencing the issue number (`Closes #123`).
 
 ## Tests
 
 ```bash
-# Contracts (Rust) — 40 tests across 5 contracts
+# Contracts (Rust)
 cargo test --workspace
 
 # Frontend (Jest + RTL)
 cd frontend && npm test
 ```
 
-## CI/CD
+No CI is configured on this branch — run tests locally before opening a PR.
 
-GitHub Actions on every push:
-1. `cargo test --workspace` + WASM build
-2. Frontend lint → type-check → Jest → `next build`
-3. Vercel production deploy on `main`
+## Deploy contracts (once implemented)
 
-Set `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` in repo secrets.
+```bash
+stellar keys generate mykey --network testnet
+curl "https://friendbot.stellar.org/?addr=$(stellar keys address mykey)"
+./scripts/deploy.sh testnet mykey
+```
 
 ## Stack
 

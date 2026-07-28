@@ -26,3 +26,6 @@ frontend/tsconfig.tsbuildinfo
 # Misc
 *.log
 *.tmp
+.agents/
+issue.md    
+skills-lock.json

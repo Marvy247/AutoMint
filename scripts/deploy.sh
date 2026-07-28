@@ -1,83 +1,124 @@
 #!/usr/bin/env bash
-# Usage: ./scripts/deploy.sh [testnet|mainnet] [key-alias]
-# Default key alias: deployer  (stellar keys generate deployer --network testnet)
-set -euo pipefail
 
+set -e
+
+# Accept network and identity as arguments
 NETWORK="${1:-testnet}"
-KEY="${2:-deployer}"
+IDENTITY="${2:-mykey}"
 
-if [[ "$NETWORK" == "testnet" ]]; then
-  RPC_URL="https://soroban-testnet.stellar.org"
-  PASSPHRASE="Test SDF Network ; September 2015"
-else
-  RPC_URL="https://soroban-rpc.stellar.org"
-  PASSPHRASE="Public Global Stellar Network ; September 2015"
+echo "Deploying to network: $NETWORK using identity: $IDENTITY"
+
+# 1. Build all contracts
+echo "Building all contracts..."
+stellar contract build
+
+# 2. Get administrative address for the identity
+echo "Resolving admin address..."
+ADMIN_ADDRESS=$(stellar keys address "$IDENTITY")
+echo "Admin Address: $ADMIN_ADDRESS"
+
+# 3. Deploy each contract wasm
+echo "Deploying Registry contract..."
+REGISTRY_ID=$(stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/automint_registry.wasm \
+  --source "$IDENTITY" \
+  --network "$NETWORK")
+echo "Registry Contract ID: $REGISTRY_ID"
+
+echo "Deploying BotNFT contract..."
+BOT_NFT_ID=$(stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/automint_bot_nft.wasm \
+  --source "$IDENTITY" \
+  --network "$NETWORK")
+echo "BotNFT Contract ID: $BOT_NFT_ID"
+
+echo "Deploying Accrual contract..."
+ACCRUAL_ID=$(stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/automint_accrual.wasm \
+  --source "$IDENTITY" \
+  --network "$NETWORK")
+echo "Accrual Contract ID: $ACCRUAL_ID"
+
+echo "Deploying Marketplace contract..."
+MARKETPLACE_ID=$(stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/automint_marketplace.wasm \
+  --source "$IDENTITY" \
+  --network "$NETWORK")
+echo "Marketplace Contract ID: $MARKETPLACE_ID"
+
+echo "Deploying Token contract..."
+TOKEN_ID=$(stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/automint_token.wasm \
+  --source "$IDENTITY" \
+  --network "$NETWORK")
+echo "Token Contract ID: $TOKEN_ID"
+
+# 4. Call initialize on each deployed contract
+echo "Initializing Registry..."
+stellar contract invoke \
+  --id "$REGISTRY_ID" \
+  --source "$IDENTITY" \
+  --network "$NETWORK" \
+  -- initialize --admin "$ADMIN_ADDRESS"
+
+echo "Initializing BotNFT..."
+stellar contract invoke \
+  --id "$BOT_NFT_ID" \
+  --source "$IDENTITY" \
+  --network "$NETWORK" \
+  -- initialize --admin "$ADMIN_ADDRESS" --registry "$REGISTRY_ID"
+
+echo "Initializing Accrual..."
+stellar contract invoke \
+  --id "$ACCRUAL_ID" \
+  --source "$IDENTITY" \
+  --network "$NETWORK" \
+  -- initialize --admin "$ADMIN_ADDRESS" --points_per_amt 100
+
+echo "Initializing Marketplace..."
+stellar contract invoke \
+  --id "$MARKETPLACE_ID" \
+  --source "$IDENTITY" \
+  --network "$NETWORK" \
+  -- initialize --admin "$ADMIN_ADDRESS" --bot-nft "$BOT_NFT_ID" --fee-bps 250
+
+echo "Initializing Token..."
+stellar contract invoke \
+  --id "$TOKEN_ID" \
+  --source "$IDENTITY" \
+  --network "$NETWORK" \
+  -- initialize --admin "$ADMIN_ADDRESS" --decimal 7 --name "AutoMint Token" --symbol "AMT"
+
+# 5. Write the resulting contract IDs into frontend/.env.local
+echo "Writing contract IDs to frontend/.env.local..."
+if [ ! -f frontend/.env.local ]; then
+  if [ -f frontend/.env.example ]; then
+    cp frontend/.env.example frontend/.env.local
+  else
+    touch frontend/.env.local
+  fi
 fi
 
-ADMIN=$(stellar keys address "$KEY")
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " AutoMint Deploy  |  $NETWORK"
-echo " Admin: $ADMIN"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-# build (stellar contract build uses wasm32v1-none which the Soroban VM requires)
-echo "Building WASM..."
-stellar contract build --quiet 2>/dev/null || stellar contract build
-WASM="target/wasm32v1-none/release"
-
-_deploy() {
-  stellar contract deploy \
-    --wasm "$WASM/$1.wasm" \
-    --source "$KEY" \
-    --network "$NETWORK"
+# Replace placeholders or update keys in frontend/.env.local
+update_env_var() {
+  local key=$1
+  local value=$2
+  if grep -q "^$key=" frontend/.env.local; then
+    # Key exists, update it
+    sed -i "s|^$key=.*|$key=$value|g" frontend/.env.local
+  else
+    # Key doesn't exist, append it
+    echo "$key=$value" >> frontend/.env.local
+  fi
 }
 
-_invoke() {
-  local id="$1"; shift
-  stellar contract invoke \
-    --id "$id" \
-    --source "$KEY" \
-    --network "$NETWORK" \
-    -- "$@"
-}
+update_env_var "NEXT_PUBLIC_NETWORK" "TESTNET"
+update_env_var "NEXT_PUBLIC_SOROBAN_RPC_URL" "https://soroban-testnet.stellar.org"
+update_env_var "NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE" "\"Test SDF Network ; September 2015\""
+update_env_var "NEXT_PUBLIC_REGISTRY_CONTRACT_ID" "$REGISTRY_ID"
+update_env_var "NEXT_PUBLIC_BOT_NFT_CONTRACT_ID" "$BOT_NFT_ID"
+update_env_var "NEXT_PUBLIC_ACCRUAL_CONTRACT_ID" "$ACCRUAL_ID"
+update_env_var "NEXT_PUBLIC_MARKETPLACE_CONTRACT_ID" "$MARKETPLACE_ID"
+update_env_var "NEXT_PUBLIC_TOKEN_CONTRACT_ID" "$TOKEN_ID"
 
-# deploy
-echo "Deploying..."
-TOKEN_ID=$(_deploy automint_token)
-REGISTRY_ID=$(_deploy automint_registry)
-BOT_NFT_ID=$(_deploy automint_bot_nft)
-ACCRUAL_ID=$(_deploy automint_accrual)
-MARKETPLACE_ID=$(_deploy automint_marketplace)
-
-# initialize — order matters: token before accrual, accrual before set_admin
-_invoke "$TOKEN_ID" initialize --admin "$ADMIN" --decimal 7 --name "AutoMint Token" --symbol "AMT"
-_invoke "$REGISTRY_ID" initialize --admin "$ADMIN"
-_invoke "$BOT_NFT_ID" initialize --admin "$ADMIN"
-_invoke "$ACCRUAL_ID" initialize --admin "$ADMIN" --registry "$REGISTRY_ID" --bot_nft "$BOT_NFT_ID" --token "$TOKEN_ID"
-_invoke "$MARKETPLACE_ID" initialize --admin "$ADMIN" --bot_nft "$BOT_NFT_ID" --fee_recipient "$ADMIN"
-# hand token admin to accrual so it can mint $AMT on claim
-_invoke "$TOKEN_ID" set_admin --new_admin "$ACCRUAL_ID"
-
-# write frontend env
-cat > frontend/.env.local <<EOF
-NEXT_PUBLIC_NETWORK=$NETWORK
-NEXT_PUBLIC_RPC_URL=$RPC_URL
-NEXT_PUBLIC_NETWORK_PASSPHRASE=$PASSPHRASE
-NEXT_PUBLIC_REGISTRY_CONTRACT_ID=$REGISTRY_ID
-NEXT_PUBLIC_BOT_NFT_CONTRACT_ID=$BOT_NFT_ID
-NEXT_PUBLIC_ACCRUAL_CONTRACT_ID=$ACCRUAL_ID
-NEXT_PUBLIC_MARKETPLACE_CONTRACT_ID=$MARKETPLACE_ID
-NEXT_PUBLIC_TOKEN_CONTRACT_ID=$TOKEN_ID
-EOF
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " Deployed on $NETWORK"
-echo " Token      : $TOKEN_ID"
-echo " Registry   : $REGISTRY_ID"
-echo " Bot NFT    : $BOT_NFT_ID"
-echo " Accrual    : $ACCRUAL_ID"
-echo " Marketplace: $MARKETPLACE_ID"
-echo " .env.local written"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Deployment complete! Contract IDs saved to frontend/.env.local"

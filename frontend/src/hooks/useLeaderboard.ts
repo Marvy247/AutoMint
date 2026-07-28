@@ -1,21 +1,15 @@
-'use client';
-import { useQuery } from '@tanstack/react-query';
-import { getLeaderboard, getTotalUsers } from '@/lib/contracts';
-import { LEADERBOARD_LIMIT, POLL_INTERVAL_MS } from '@/lib/constants';
-import type { UserProfile } from '@/types';
+import { useQuery } from "@tanstack/react-query";
+import { getLeaderboard } from "@/lib/contracts";
+import type { UserProfile } from "@/types";
 
-export function useLeaderboard() {
-  const { data: rankings = [], isLoading, error, refetch } = useQuery<UserProfile[]>({
-    queryKey: ['leaderboard'],
-    queryFn: () => getLeaderboard(LEADERBOARD_LIMIT),
-    refetchInterval: POLL_INTERVAL_MS,
+const LEADERBOARD_POLL_INTERVAL = 30_000;
+const DEFAULT_LEADERBOARD_LIMIT = 50;
+
+export function useLeaderboard(limit = DEFAULT_LEADERBOARD_LIMIT) {
+  return useQuery<UserProfile[]>({
+    queryKey: ["leaderboard", limit],
+    queryFn: () => getLeaderboard(limit),
+    refetchInterval: LEADERBOARD_POLL_INTERVAL,
+    staleTime: 15_000,
   });
-
-  const { data: totalUsers = 0 } = useQuery<number>({
-    queryKey: ['totalUsers'],
-    queryFn: getTotalUsers,
-    refetchInterval: POLL_INTERVAL_MS,
-  });
-
-  return { rankings, totalUsers, isLoading, error, refetch };
 }

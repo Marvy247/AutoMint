@@ -1,119 +1,105 @@
-'use client';
-import { useState } from 'react';
-import { Loader2 } from 'lucide-react';
-import { Modal } from '@/components/ui/Modal';
-import { BotCard } from '@/components/dashboard/BotCard';
-import { xlmToStroops } from '@/types';
-import { CONTRACT_ADDRESSES } from '@/lib/constants';
-import type { BotNFT } from '@/types';
+"use client";
+
+import { useState, useMemo, useId } from "react";
+import { toast } from "sonner";
+import Modal from "@/components/ui/Modal";
+import { useListBot } from "@/hooks/useMarketplace";
+import { xlmToStroops, stroopsToXlm } from "@/types";
+import type { BotNFT } from "@/types";
+
+const FEE_PERCENT = 2.5;
+const NET_PERCENT = 100 - FEE_PERCENT;
 
 interface ListBotModalProps {
-  bot: BotNFT | null;
+  bot: BotNFT;
   isOpen: boolean;
   onClose: () => void;
-  onList: (params: {
-    botId: bigint;
-    botTier: number;
-    priceStroops: bigint;
-    currencyAddress: string;
-  }) => Promise<void>;
-  isListing: boolean;
 }
 
-export function ListBotModal({ bot, isOpen, onClose, onList, isListing }: ListBotModalProps) {
-  const [price, setPrice] = useState('');
-  const [error, setError] = useState('');
+export default function ListBotModal({ bot, isOpen, onClose }: ListBotModalProps) {
+  const [priceXlm, setPriceXlm] = useState("");
+  const listBot = useListBot();
+  const priceInputId = useId();
+
+  const priceNum = useMemo(() => {
+    const n = parseFloat(priceXlm);
+    return isNaN(n) || n <= 0 ? 0 : n;
+  }, [priceXlm]);
+
+  const fee = useMemo(() => (priceNum * FEE_PERCENT) / 100, [priceNum]);
+  const net = useMemo(() => (priceNum * NET_PERCENT) / 100, [priceNum]);
 
   const handleSubmit = async () => {
-    const xlm = parseFloat(price);
-    if (!xlm || xlm <= 0) { setError('Enter a valid price in XLM'); return; }
-    if (!bot) return;
-    setError('');
-    try {
-      await onList({
-        botId: bot.id,
-        botTier: ['Basic', 'Bronze', 'Silver', 'Gold', 'Diamond'].indexOf(bot.tier),
-        priceStroops: xlmToStroops(xlm),
-        currencyAddress: CONTRACT_ADDRESSES.TOKEN,
-      });
-      onClose();
-      setPrice('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to list bot');
-    }
+    if (priceNum <= 0) return;
+    const priceStroops = xlmToStroops(priceNum);
+    listBot.mutate(
+      { botId: bot.id, price: priceStroops },
+      {
+        onSuccess: () => {
+          toast.success(`${bot.name} listed for ${priceNum} XLM`);
+          onClose();
+          setPriceXlm("");
+        },
+        // #199 — previously silent: a failed listing gave the user no
+        // feedback at all beyond the button reverting to its idle label.
+        onError: (err) => {
+          toast.error(
+            err instanceof Error ? err.message : "Failed to list bot for sale. Please try again.",
+          );
+        },
+      },
+    );
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="List Bot for Sale">
-      {bot && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {/* Bot preview */}
-          <BotCard bot={bot} compact />
+    <Modal isOpen={isOpen} onClose={onClose} title={`List ${bot.name} for Sale`}>
+      <div className="flex flex-col gap-5">
+        {/* Price input */}
+        <label htmlFor={priceInputId} className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-muted">Price (XLM)</span>
+          <input
+            id={priceInputId}
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            placeholder="0.00"
+            value={priceXlm}
+            onChange={(e) => setPriceXlm(e.target.value)}
+            aria-describedby={priceNum > 0 ? `${priceInputId}-fee` : undefined}
+            className="rounded-xl border border-liner bg-card-2 px-4 py-3 text-lg text-text placeholder:text-muted/50 focus:border-gold/50 focus:outline-none focus:ring-1 focus:ring-gold/30"
+          />
+        </label>
 
-          {/* Price input */}
-          <div>
-            <label
-              className="block text-xs font-semibold uppercase tracking-widest mb-2"
-              style={{ color: 'var(--muted)' }}
-            >
-              Sale price (XLM)
-            </label>
-            <div className="relative">
-              <input
-                type="number"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                placeholder="e.g. 500"
-                min="1"
-                step="1"
-                className="w-full rounded-xl px-4 py-3 pr-16 text-sm outline-none transition-all"
-                style={{
-                  background: 'var(--card-2)',
-                  border: '1px solid var(--liner)',
-                  color: 'var(--text)',
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--gold)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--liner)')}
-              />
-              <span
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-mono"
-                style={{ color: 'var(--muted)' }}
-              >
-                XLM
-              </span>
+        {/* Live fee breakdown */}
+        {priceNum > 0 && (
+          <div
+            id={`${priceInputId}-fee`}
+            role="status"
+            aria-live="polite"
+            className="rounded-xl border border-liner bg-card p-4 text-sm"
+          >
+            <div className="flex items-center justify-between text-muted">
+              <span>Marketplace fee ({FEE_PERCENT}%)</span>
+              <span>-{fee.toFixed(4)} XLM</span>
             </div>
-            {error && <p className="text-xs mt-1.5" style={{ color: 'var(--pink)' }}>{error}</p>}
+            <div className="mt-2 flex items-center justify-between border-t border-liner pt-2 font-semibold text-text">
+              <span>You receive ({NET_PERCENT}%)</span>
+              <span className="text-green">{net.toFixed(4)} XLM</span>
+            </div>
           </div>
+        )}
 
-          {/* Fee note */}
-          <p className="text-xs" style={{ color: 'var(--muted)' }}>
-            2.5% marketplace fee applies on sale. You receive{' '}
-            <span style={{ color: 'var(--gold)', fontWeight: 600 }}>
-              {price ? ((parseFloat(price) || 0) * 0.975).toFixed(2) : '—'} XLM
-            </span>{' '}
-            after fees.
-          </p>
-
-          {/* Actions */}
-          <div className="flex gap-3">
-            <button onClick={onClose} className="btn-ghost flex-1" style={{ borderRadius: '14px', padding: '12px' }}>
-              Cancel
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={isListing || !price}
-              className="btn-primary flex-1 justify-center"
-              style={{ borderRadius: '14px', padding: '12px' }}
-            >
-              {isListing ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /> Listing…</>
-              ) : (
-                'Confirm Listing'
-              )}
-            </button>
-          </div>
-        </div>
-      )}
+        {/* Submit */}
+        <button
+          onClick={handleSubmit}
+          disabled={priceNum <= 0 || listBot.isPending}
+          aria-busy={listBot.isPending}
+          className="btn-primary w-full py-3 text-base"
+        >
+          {listBot.isPending ? "Listing…" : "List for Sale"}
+        </button>
+      </div>
     </Modal>
   );
 }

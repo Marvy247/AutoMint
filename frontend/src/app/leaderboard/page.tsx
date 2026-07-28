@@ -1,89 +1,128 @@
-'use client';
-import { motion } from 'framer-motion';
-import { Trophy, RefreshCw, Users, Zap } from 'lucide-react';
-import { useLeaderboard } from '@/hooks/useLeaderboard';
-import { LeaderboardTable } from '@/components/leaderboard/LeaderboardTable';
-import { useWallet } from '@/hooks/useWallet';
-import { formatPoints } from '@/types';
+"use client";
+
+import { useEffect, useRef } from "react";
+import { toast } from "sonner";
+import { Trophy, RotateCw } from "lucide-react";
+import { useLeaderboard } from "@/hooks/useLeaderboard";
+import { useWalletStore } from "@/store/walletStore";
+import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
+import { Skeleton } from "@/components/ui/Skeleton";
+import type { UserProfile } from "@/types";
+
+function mapToTableUsers(
+  users: UserProfile[],
+  currentAddress: string | null
+) {
+  return users.map((user, index) => ({
+    rank: index + 1,
+    username: user.username,
+    address: currentAddress ?? "",
+    points: Number(user.points),
+    isCurrentUser: false, // address matching handled inside table via currentAddress prop
+  }));
+}
 
 export default function LeaderboardPage() {
-  const { rankings, totalUsers, isLoading, refetch } = useLeaderboard();
-  const { publicKey } = useWallet();
-  const myRank = rankings.findIndex((u) => u.address === publicKey) + 1;
+  const { data: leaderboardData, isLoading, isError, refetch, isRefetching } = useLeaderboard();
+  const publicKey = useWalletStore((s) => s.publicKey);
+
+  // #202 — surface load failures the same way the rest of the app does
+  // (sonner toast), in addition to the existing inline error panel.
+  const hasToastedError = useRef(false);
+  useEffect(() => {
+    if (isError && !hasToastedError.current) {
+      hasToastedError.current = true;
+      toast.error("Failed to load leaderboard. Please try again later.");
+    } else if (!isError) {
+      hasToastedError.current = false;
+    }
+  }, [isError]);
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="memefi-h2" style={{ fontSize: '32px' }}>Leaderboard</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-            Top miners ranked by total points earned on-chain
-          </p>
+    <main className="mx-auto max-w-4xl px-4 py-10">
+      {/* Page header */}
+      <div className="mb-8 flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gold/15">
+          <Trophy className="h-5 w-5 text-gold" />
         </div>
-        <button
-          onClick={() => refetch()}
-          aria-label="Refresh"
-          className="p-2 rounded-xl transition-colors"
-          style={{ border: '1px solid var(--liner)', color: 'var(--muted)', background: 'transparent' }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text)')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--muted)')}
+        <div>
+          <h1 className="font-display text-2xl font-bold text-text">
+            Leaderboard
+          </h1>
+          <p className="text-sm text-muted">Top earners across the network</p>
+        </div>
+      </div>
+
+      {/* Loading state — skeleton rows matching the real table shape, per
+          the app-wide loading convention (Skeleton component), instead of
+          a generic spinner. */}
+      {isLoading && (
+        <div
+          className="overflow-hidden rounded-2xl border border-liner"
+          data-testid="leaderboard-loading"
+          aria-busy="true"
+          aria-live="polite"
         >
-          <RefreshCw className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Stat cards */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
-        {[
-          {
-            icon: Users,
-            label: 'TOTAL PLAYERS',
-            value: String(totalUsers),
-            color: 'var(--blue)',
-          },
-          {
-            icon: Trophy,
-            label: 'TOP SCORE',
-            value: rankings[0] ? formatPoints(rankings[0].totalPoints) : '—',
-            color: 'var(--gold)',
-          },
-          {
-            icon: Zap,
-            label: 'YOUR RANK',
-            value: publicKey && myRank > 0 ? `#${myRank}` : '—',
-            color: 'var(--green)',
-          },
-        ].map(({ icon: Icon, label, value, color }, i) => (
-          <motion.div
-            key={label}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.06 }}
-            className="mf-card-2 text-center"
-            style={{ padding: '20px 12px', borderRadius: '20px' }}
-          >
-            <Icon className="w-5 h-5 mx-auto mb-2" style={{ color }} />
-            <div className="text-xs uppercase tracking-widest font-semibold mb-1" style={{ color: 'var(--muted)' }}>
-              {label}
-            </div>
+          <div className="flex border-b border-liner px-4 py-3">
+            <Skeleton className="h-3 w-10" />
+          </div>
+          {Array.from({ length: 6 }).map((_, i) => (
             <div
-              className="font-black"
-              style={{ fontFamily: "'Sora', sans-serif", fontSize: '26px', color, lineHeight: 1, letterSpacing: '-0.5px' }}
+              key={i}
+              className="flex items-center gap-4 border-b border-liner px-4 py-3 last:border-b-0"
             >
-              {value}
+              <Skeleton className="h-5 w-6 rounded" />
+              <Skeleton className="h-4 flex-1 max-w-[10rem]" />
+              <Skeleton className="ml-auto h-4 w-14" />
+              <Skeleton className="hidden h-3 w-20 sm:block" />
             </div>
-          </motion.div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {/* Table */}
-      <LeaderboardTable rankings={rankings} currentUserAddress={publicKey} isLoading={isLoading} />
+      {/* Error state */}
+      {isError && !isLoading && (
+        <div
+          className="rounded-2xl border border-liner bg-card px-6 py-10 text-center text-muted"
+          data-testid="leaderboard-error"
+        >
+          <p className="text-sm">
+            Failed to load leaderboard. Please try again later.
+          </p>
+          <button
+            onClick={() => refetch()}
+            disabled={isRefetching}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-liner px-4 py-2 text-sm font-semibold text-text hover:border-gold/50 hover:text-gold transition-colors disabled:opacity-50"
+          >
+            <RotateCw className={isRefetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+            {isRefetching ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
 
-      <p className="text-center text-xs mt-5" style={{ color: 'var(--muted)', opacity: 0.6 }}>
-        Updates every 30s · Sorted by total points earned on Stellar
-      </p>
-    </div>
+      {/* Empty state */}
+      {!isLoading && !isError && (!leaderboardData || leaderboardData.length === 0) && (
+        <div
+          className="rounded-2xl border border-liner bg-card px-6 py-10 text-center text-muted"
+          data-testid="leaderboard-empty"
+        >
+          <Trophy className="mx-auto mb-3 h-8 w-8 opacity-30" />
+          <p className="text-sm">No rankings yet. Be the first to earn points!</p>
+        </div>
+      )}
+
+      {/* Populated table */}
+      {!isLoading && !isError && leaderboardData && leaderboardData.length > 0 && (
+        <LeaderboardTable
+          users={leaderboardData.map((user, index) => ({
+            rank: index + 1,
+            address: "", // UserProfile doesn't carry address; display username instead
+            username: user.username,
+            points: Number(user.points),
+          }))}
+          currentAddress={publicKey}
+        />
+      )}
+    </main>
   );
 }
