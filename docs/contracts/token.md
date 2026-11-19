@@ -80,6 +80,30 @@ Transfer tokens from one address to another. Requires authorization from `from`.
 
 ---
 
+### transfer_batch
+
+```rust
+pub fn transfer_batch(
+  env: Env,
+  from: Address,
+  recipients: Vec<Address>,
+  amounts: Vec<i128>,
+) -> Result<(), TokenError>
+```
+
+Transfer to multiple recipients from a single source in one call. Requires authorization from `from`.
+
+- `recipients` and `amounts` must have the same length (`LengthMismatch` otherwise)
+- At most `MAX_BATCH_SIZE` (100) recipients (`BatchTooLarge` otherwise)
+- Negative amounts return `TokenError::NegativeAmount`
+- Duplicate recipients are aggregated before balances are written
+- The full total is debited from `from` once; insufficient balance returns `TokenError::InsufficientBalance`
+- Zero amounts are skipped when writing balances but still produce a `transfer` event for that recipient
+- Emits one SAC-shaped `transfer(from, recipient)` event per recipient
+- Rejected with `TokenError::Paused` while the contract is paused
+
+---
+
 ### transfer_from
 
 ```rust
@@ -166,6 +190,47 @@ Burn tokens from an address. Requires authorization from `from`.
 
 ---
 
+### burn_from
+
+```rust
+pub fn burn_from(
+  env: Env,
+  spender: Address,
+  from: Address,
+  amount: i128,
+) -> Result<(), TokenError>
+```
+
+Burn tokens from `from` using an allowance granted to `spender`. Requires authorization from `spender`.
+
+- Zero amounts are no-ops and return `Ok(())`
+- Negative amounts return `TokenError::NegativeAmount`
+- Expired or insufficient allowance returns the corresponding allowance error
+- Insufficient balance returns `TokenError::InsufficientBalance`
+- Rejected with `TokenError::Paused` while the contract is paused
+- Emits `burn(from)` with `amount`, the same topic/data shape as `burn`
+
+---
+
+### set_mint_limit
+
+```rust
+pub fn set_mint_limit(
+  env: Env,
+  max_per_window: i128,
+  window_ledgers: u32,
+) -> Result<(), TokenError>
+```
+
+Admin-only rolling mint ceiling: at most `max_per_window` tokens may be minted per `window_ledgers` ledgers. A `max_per_window` of `0` disables the limiter; an enabled limit requires a non-zero `window_ledgers`.
+
+- Negative `max_per_window`, or a positive limit with `window_ledgers == 0`, returns `TokenError::InvalidMintLimit`
+- Initializes the current mint window if one does not exist yet
+- Emits `mintlim` with `(max_per_window, window_ledgers)`
+- `mint` rejects an amount that would exceed the window with `TokenError::MintLimitExceeded`
+
+---
+
 ### set_admin
 
 ```rust
@@ -248,6 +313,77 @@ Query the token symbol. Returns `TokenError::NotInitialized` if the contract is 
 
 ---
 
+### total_supply
+
+```rust
+pub fn total_supply(env: Env) -> i128
+```
+
+Return the current total supply, tracked on every `mint` and `burn`/`burn_from`. Returns `0` before the first mint.
+
+---
+
+### max_supply
+
+```rust
+pub fn max_supply(env: Env) -> Option<i128>
+```
+
+Return the configured maximum supply cap, or `None` when no cap is set (unlimited minting, subject to the mint limit).
+
+---
+
+### set_max_supply
+
+```rust
+pub fn set_max_supply(env: Env, new_cap: Option<i128>) -> Result<(), TokenError>
+```
+
+Admin-only: set (`Some(cap)`) or remove (`None`) the maximum supply cap. A cap below the current `total_supply` returns `TokenError::SupplyCapExceeded`; a negative cap returns `TokenError::NegativeAmount`. `mint` rejects any amount that would push supply past the cap with `TokenError::SupplyCapExceeded`. Emits `maxsup` with the new cap, or `-1` when the cap is removed.
+
+---
+
+### paused
+
+```rust
+pub fn paused(env: Env) -> bool
+```
+
+Return whether the contract is currently paused. Read-only and never errors.
+
+---
+
+### pause / unpause
+
+```rust
+pub fn pause(env: Env) -> Result<(), TokenError>
+pub fn unpause(env: Env) -> Result<(), TokenError>
+```
+
+Admin-only circuit breaker. While paused, state-changing token operations (`transfer`, `transfer_batch`, `transfer_from`, `mint`, `burn`, `burn_from`) fail with `TokenError::Paused`; reads and `bump_balance` continue to work. `pause` emits `pause` with `true`, `unpause` emits `unpause` with `false`.
+
+Errors:
+- `NotInitialized`: The contract has not been initialized.
+- `Unauthorized`: Caller is not the admin.
+
+---
+
+### upgrade
+
+```rust
+pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), TokenError>
+```
+
+Admin-only: replace the contract's wasm with the code identified by `new_wasm_hash`. Emits `upgrade` with empty data.
+
+Errors:
+- `NotInitialized`: The contract has not been initialized.
+- `Unauthorized`: Caller is not the admin.
+
+> **Token administration via Accrual:** once the Accrual contract is the token admin (see `accept_token_admin` in [accrual.md](./accrual.md)), these admin-only entry points must be driven through Accrual. Accrual exposes `set_mint_limit` as a wrapper and authorizes the Token's `set_admin`/`accept_admin` calls as itself; direct calls from the old admin will fail authorization.
+
+---
+
 ## Error Codes
 
 | Error | Code | Description |
@@ -267,6 +403,8 @@ Query the token symbol. Returns `TokenError::NotInitialized` if the contract is 
 | `NoPendingAdmin` | 13 | No administrator transfer is pending |
 | `LengthMismatch` | 14 | `transfer_batch` received different counts of recipients and amounts |
 | `BatchTooLarge` | 15 | `transfer_batch` received more than `MAX_BATCH_SIZE` (100) recipients |
+| `MintLimitExceeded` | 16 | Mint would exceed the rolling mint limit |
+| `InvalidMintLimit` | 17 | Mint limit is negative or has a zero window |
 | `Paused` | 1000 | Contract is paused |
 
 ---
@@ -285,7 +423,13 @@ The contract emits the following events, matching the Stellar Asset Contract (SA
 |----------|--------|------|
 | `transfer` | `("transfer", from, to)` | `amount: i128` |
 | `mint` | `("mint", admin, to)` | `amount: i128` |
-| `burn` | `("burn", from)` | `amount: i128` |
+| `burn` / `burn_from` | `("burn", from)` | `amount: i128` |
+| `transfer_batch` | `("transfer", from, recipient)` per recipient | `amount: i128` |
+| `set_mint_limit` | `("mintlim", admin)` | `(max_per_window: i128, window_ledgers: u32)` |
+| `set_max_supply` | `("maxsup",)` | `new_cap: i128` (`-1` when the cap is removed) |
+| `pause` | `("pause",)` | `true` |
+| `unpause` | `("unpause",)` | `false` |
+| `upgrade` | `("upgrade",)` | `()` |
 | `approve` | `("approve", from, spender)` | `(amount: i128, expiration_ledger: u32)` |
 | `admin_proposed` | `("admin_proposed", current_admin)` | `pending_admin: Address` |
 | `set_admin` | `("set_admin", old_admin)` | `new_admin: Address` |

@@ -79,9 +79,34 @@ new admin — same event name, different contracts.
 | `cancel` | `[seller: Address, listing_id: u64]` | `bot_id: u64` | `cancel_listing()` |
 | `reclaimed` | `[seller: Address, listing_id: u64]` | `bot_id: u64` | `reclaim_expired()` |
 | `deactive` | `[bot_id: u64]` | `listing_id: u64` | `on_bot_moved()` (bot transferred out of escrow) |
+| `offered` | `[buyer: Address, offer_id: u64]` | `(bot_id: u64, amount: i128, expires_at: u64)` | `make_offer()` |
+| `offer_acc` | `[seller: Address, buyer: Address]` | `(offer_id: u64, bot_id: u64, amount: i128)` | `accept_offer()` |
+| `offer_cxl` | `[buyer: Address, offer_id: u64]` | `(bot_id: u64, amount: i128, expired: bool)` | `cancel_offer()` |
+| `offer_dsm` | `[buyer: Address, offer_id: u64]` | `(bot_id: u64, amount: i128, caller: Address)` | `dismiss_offer()` |
+| `fees_wd` | `[admin: Address, to: Address]` | `(currency: Address, amount: i128, remaining: i128)` | `withdraw_fees()` |
+| `fee_bps_upd` | *(none)* | `(old_fee_bps: u32, new_fee_bps: u32)` | `set_fee_bps()` |
+| `min_price` | `[currency: Address]` | `(old_min_price: i128, new_min_price: i128)` | `set_min_price()` (old value is `0` when no override existed) |
+| `listing_cap_upd` | *(none)* | `new_cap: u32` | `set_listing_cap()` |
+| `bot_nft_upd` | *(none)* | `(old_nft: Address, new_nft: Address)` | `set_bot_nft()` |
+| `currency_added` | *(none)* | `currency: Address` | `add_allowed_currency()` |
+| `currency_removed` | *(none)* | `currency: Address` | `remove_allowed_currency()` |
+| `paused` | *(none)* | `admin: Address` | `pause()` |
+| `unpaused` | *(none)* | `admin: Address` | `unpause()` |
+| `admin_proposed` | *(none)* | `(current_admin: Address, pending_admin: Address)` | `propose_admin()` |
+| `admin_upd` | *(none)* | `(old_admin: Address, new_admin: Address)` | `accept_admin()` |
+| `initialized` | *(none)* | `(admin: Address, bot_nft: Address, fee_bps: u32)` | `initialize()` |
 
 `listed` and `sold` carry the listing's `currency` so volume and floor price
 are kept per currency. Prices in different tokens are never summed.
+
+Offer amounts are escrowed funds, not sales: only `offer_acc` is a completed
+sale, and it is recorded in the buyer's purchase history with `listing_id = 0`.
+`offer_cxl` and `offer_dsm` both refund the buyer in full; the `expired` flag on
+`offer_cxl` distinguishes a keeper-triggered cleanup from a buyer cancellation.
+
+`paused`/`unpaused` and the admin events are operational signals rather than
+trading data. `initialized` fires exactly once per contract deployment; none of
+these should be counted toward volume, floor or user aggregates.
 
 ## Token (AMT) contract
 
@@ -122,13 +147,14 @@ Assumptions made in place of the missing ticket context:
 - **AM-099 (unknown — possibly listing metadata):** the marketplace `listed`
   event does **not** include `bot_tier`; the indexer stores `bot_tier = NULL`
   in the `listings` table. `currency` is now part of `listed` and `sold`.
-- **AM-124 (unknown):** unresolved; assumed no fee fields are emitted. Note
-  that the marketplace `sold` event carries only `(listing_id, bot_id, price,
-  currency)` — the
-  2.5% fee and seller payment are **not** in the event, so the "fee bug"
-  question (AM-006) **cannot** be answered from events alone today. Confirming
-  whether AM-124 adds fee fields (or whether the fee should be computed from
-  `price`) is required before adding a fee-anomaly aggregate.
+- **AM-124 (unknown):** unresolved; assumed no per-sale fee fields are
+  emitted. The marketplace `sold` event carries only `(listing_id, bot_id,
+  price, currency)` — the platform fee and seller payment are **not** in that
+  event. `fees_wd` reports withdrawals and their remaining accrued balance,
+  not the fee taken on any individual sale, so the "fee bug" question (AM-006)
+  **cannot** be answered from events alone today. Confirming whether AM-124
+  adds per-sale fee fields (or whether the fee should be computed from `price`)
+  is required before adding a fee-anomaly aggregate.
 
 These are the exact items to confirm with the contract owners before this
 indexer is considered complete for production.

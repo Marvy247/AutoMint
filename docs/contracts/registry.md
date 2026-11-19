@@ -110,6 +110,63 @@ let profile = registry_client.get_user(&user);
 
 ---
 
+### get_points
+
+```rust
+pub fn get_points(env: Env, user: Address) -> Result<u64, RegistryError>
+```
+
+Return `user`'s lifetime `total_points`. Reads the denormalized `UserPoints` key and falls back to the profile's `total_points` field when that key is absent (profiles written before the denormalized keys were introduced).
+
+Errors:
+- `NotRegistered`: `user` has no profile.
+
+Example:
+
+```rust
+let points = registry_client.get_points(&user);
+```
+
+---
+
+### get_bot_count
+
+```rust
+pub fn get_bot_count(env: Env, user: Address) -> Result<u32, RegistryError>
+```
+
+Return the number of bots `user` holds, as tracked by the Bot NFT contract through `increment_bot_count` / `decrement_bot_count`. Reads the denormalized `UserBotCount` key and falls back to the profile's `bot_count` field when that key is absent.
+
+Errors:
+- `NotRegistered`: `user` has no profile.
+
+Example:
+
+```rust
+let bots = registry_client.get_bot_count(&user);
+```
+
+---
+
+### get_claimed_amt
+
+```rust
+pub fn get_claimed_amt(env: Env, user: Address) -> Result<i128, RegistryError>
+```
+
+Return the cumulative AMT `user` has claimed, in token base units (`i128`). The value is monotonically non-decreasing; see `add_claimed_amt`. Reads the denormalized `UserClaimedAmt` key and falls back to the profile's `claimed_amt` field when that key is absent.
+
+Errors:
+- `NotRegistered`: `user` has no profile.
+
+Example:
+
+```rust
+let claimed = registry_client.get_claimed_amt(&user);
+```
+
+---
+
 ### get_users_batch
 
 ```rust
@@ -152,6 +209,28 @@ Example:
 
 ```rust
 registry_client.add_points(&user, &200_u64);
+```
+
+---
+
+### set_points
+
+```rust
+pub fn set_points(env: Env, user: Address, value: u64) -> Result<(), RegistryError>
+```
+
+Admin-only: overwrite a registered user's lifetime `total_points` with `value`, bypassing the normal accrual path. This is an override, not an increment — the existing total is replaced rather than added to — and it also writes `value` into the **current** season's total so the active season board mirrors the new lifetime figure. Completed seasons keep their recorded `SeasonPoints`/`SeasonTop` data untouched. Emits `setpts` with the new value.
+
+Auth: admin only.
+
+Errors:
+- `NotInitialized`: The registry has not been initialized.
+- `NotRegistered`: `user` has no profile.
+
+Example:
+
+```rust
+registry_client.set_points(&user, &5_000_u64);
 ```
 
 ---
@@ -212,6 +291,22 @@ Example:
 
 ```rust
 registry_client.add_claimed_amt(&user, &2_i128);
+```
+
+---
+
+### get_users
+
+```rust
+pub fn get_users(env: Env, page: u32) -> Vec<Address>
+```
+
+Return the registered addresses on page `page` of the registration-ordered user index, `PAGE_SIZE` (200) per page. Pages are zero-based; an out-of-range page returns an empty vector. Addresses are returned in registration order, not sorted by points. Read-only.
+
+Example:
+
+```rust
+let page_0 = registry_client.get_users(&0_u32);
 ```
 
 ---
@@ -294,6 +389,41 @@ let count = registry_client.total_users();
 
 ---
 
+### verify_user_count
+
+```rust
+pub fn verify_user_count(env: Env) -> Result<u32, RegistryError>
+```
+
+Recompute the number of registered profiles by walking the paged user index and comparing each entry against live profile storage, then repair the cached `TotalUsers` counter if it disagrees. Permissionless and safe to call repeatedly. Returns the verified count. Emits `usercnt` with `(previous, count)` only when the stored counter was repaired; a no-op repair emits no event.
+
+Errors:
+- `Overflow`: The recomputed count would exceed `u32::MAX`.
+
+Example:
+
+```rust
+let verified = registry_client.verify_user_count();
+```
+
+---
+
+### users_since
+
+```rust
+pub fn users_since(env: Env, timestamp: u64) -> u32
+```
+
+Count profiles whose `registered_at` is at or after `timestamp` (a ledger timestamp in seconds). Walks the paged user index and saturates at `u32::MAX`. Read-only; returns `0` when no profile matches.
+
+Example:
+
+```rust
+let recent = registry_client.users_since(&1_700_000_000_u64);
+```
+
+---
+
 ### get_admin / set_admin / accept_admin / cancel_admin_transfer / pending_admin
 
 ```rust
@@ -323,6 +453,8 @@ Every state-changing entry point publishes exactly one event (#370). Zero-amount
 | `register` | `[user]` | `timestamp: u64` | `register()` |
 | `writers` | *(none)* | `(accrual, bot_nft)` | `set_writers()` |
 | `addpoints` | `[user]` | `points: u64` | `add_points()` |
+| `setpts` | `[user]` | `value: u64` | `set_points()` |
+| `usercnt` | *(none)* | `(previous, count)` | `verify_user_count()` (only when repairing the cached counter) |
 | `inc_bot` | `[user]` | `bot_count: u32` | `increment_bot_count()` |
 | `dec_bot` | `[user]` | `bot_count: u32` | `decrement_bot_count()` |
 | `claimed` | `[user]` | `amount: i128` | `add_claimed_amt()` (#370) |
